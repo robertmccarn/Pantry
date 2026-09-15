@@ -59,7 +59,9 @@ public sealed class HebShoppingListImporter : IHebShoppingListImporter
     {
         var document = new HtmlDocument();
         document.LoadHtml(html);
-        var title = CleanText(document.DocumentNode.SelectSingleNode("//h1")?.InnerText) ?? "H-E-B Shopping List";
+
+        var title = CleanText(document.DocumentNode.SelectSingleNode("//h1")?.InnerText)
+                    ?? "H-E-B Shopping List";
         var items = new List<HebShoppingListItem>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var quantityNodes = document.DocumentNode.SelectNodes(
@@ -72,14 +74,17 @@ public sealed class HebShoppingListImporter : IHebShoppingListImporter
         {
             var text = CleanText(node.InnerText);
             if (string.IsNullOrWhiteSpace(text)) continue;
+
             var quantityMatch = QuantityRegex.Match(text);
             if (!quantityMatch.Success) continue;
 
             var quantityText = quantityMatch.Groups[1].Value.Replace(',', '.');
-            if (!double.TryParse(quantityText, NumberStyles.Float, CultureInfo.InvariantCulture, out var quantity)) quantity = 1;
+            if (!double.TryParse(quantityText, NumberStyles.Float, CultureInfo.InvariantCulture, out var quantity))
+                quantity = 1;
 
             var name = FindProductName(node);
             if (string.IsNullOrWhiteSpace(name)) continue;
+
             name = CleanProductName(name);
             if (name.Length < 2 || !seen.Add(name)) continue;
 
@@ -100,30 +105,48 @@ public sealed class HebShoppingListImporter : IHebShoppingListImporter
 
     private static string? FindProductName(HtmlNode node)
     {
-        foreach (var selector in new[] { ".//h2", ".//h3", ".//h4", ".//a[contains(@href, '/p/') ]" })
+        // H-E-B renders the quantity near the bottom of each product card.
+        // The quantity node itself usually contains no product name, so walk
+        // upward through its ancestors and inspect each product-card level.
+        for (var current = node; current != null; current = current.ParentNode)
         {
-            var candidate = CleanText(node.SelectSingleNode(selector)?.InnerText);
-            if (IsPlausibleProductName(candidate)) return candidate;
-        }
+            foreach (var selector in new[]
+            {
+                ".//h2",
+                ".//h3",
+                ".//h4",
+                ".//a[contains(@href, '/p/') ]"
+            })
+            {
+                var candidate = CleanText(current.SelectSingleNode(selector)?.InnerText);
+                if (IsPlausibleProductName(candidate)) return candidate;
+            }
 
-        foreach (var line in node.InnerText.Split(new[] { '\r', '\n', '\t' }, StringSplitOptions.RemoveEmptyEntries).Select(CleanText))
-            if (IsPlausibleProductName(line)) return line;
+            // Avoid walking all the way up to the entire document.
+            if (current.ParentNode == null || current.ParentNode.Name.Equals("body", StringComparison.OrdinalIgnoreCase))
+                break;
+        }
 
         return null;
     }
 
     private static string FindCategory(HtmlNode node)
     {
-        for (HtmlNode? current = node.ParentNode; current != null; current = current.ParentNode)
+        for (var current = node.ParentNode, depth = 0;
+             current != null && depth < 8;
+             current = current.ParentNode, depth++)
         {
             var headings = current.SelectNodes(".//h2");
             if (headings == null) continue;
+
             foreach (var heading in headings)
             {
                 var category = CleanText(heading.InnerText);
-                if (!string.IsNullOrWhiteSpace(category) && category.Length < 80) return category;
+                if (!string.IsNullOrWhiteSpace(category) && category.Length < 80)
+                    return category;
             }
         }
+
         return string.Empty;
     }
 
@@ -135,6 +158,8 @@ public sealed class HebShoppingListImporter : IHebShoppingListImporter
         if (Regex.IsMatch(text, "^\\$?\\d+(?:\\.\\d+)?(?:\\s|$)")) return false;
         if (text.Contains("SNAP EBT", StringComparison.OrdinalIgnoreCase)) return false;
         if (text.Contains("Aisle ", StringComparison.OrdinalIgnoreCase)) return false;
+        if (text.Contains("In Produce", StringComparison.OrdinalIgnoreCase)) return false;
+        if (text.Contains("In Meat Market", StringComparison.OrdinalIgnoreCase)) return false;
         return true;
     }
 
