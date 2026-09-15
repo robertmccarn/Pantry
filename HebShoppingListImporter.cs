@@ -62,90 +62,131 @@ public sealed class HebShoppingListImporter : IHebShoppingListImporter
 
         var title = CleanText(document.DocumentNode.SelectSingleNode("//h1")?.InnerText)
                     ?? "H-E-B Shopping List";
+
         var items = new List<HebShoppingListItem>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var quantityNodes = document.DocumentNode.SelectNodes(
-            "//*[contains(normalize-space(.), 'Qty:') and not(.//*[contains(normalize-space(.), 'Qty:')])]" );
 
-        if (quantityNodes == null)
-            throw new InvalidOperationException("The H-E-B page was reached, but no shopping-list items could be read.");
+        // H-E-B product names are links to /p/ product pages. This is much
+        // safer than treating arbitrary DOM text or category headings as items.
+        var productLinks = document.DocumentNode.SelectNodes(
+            "//a[contains(@href, '/p/') and normalize-space(string(.)) != '']");
 
-        foreach (var node in quantityNodes)
+        if (productLinks != null)
         {
-            var text = CleanText(node.InnerText);
-            if (string.IsNullOrWhiteSpace(text)) continue;
-
-            var quantityMatch = QuantityRegex.Match(text);
-            if (!quantityMatch.Success) continue;
-
-            var quantityText = quantityMatch.Groups[1].Value.Replace(',', '.');
-            if (!double.TryParse(quantityText, NumberStyles.Float, CultureInfo.InvariantCulture, out var quantity))
-                quantity = 1;
-
-            var name = FindProductName(node);
-            if (string.IsNullOrWhiteSpace(name)) continue;
-
-            name = CleanProductName(name);
-            if (name.Length < 2 || !seen.Add(name)) continue;
-
-            items.Add(new HebShoppingListItem
+            foreach (var link in productLinks)
             {
-                Name = name,
-                Quantity = quantity,
-                Unit = InferUnit(name),
-                Category = FindCategory(node)
-            });
+                var name = CleanProductName(CleanText(link.InnerText) ?? string.Empty);
+                if (!IsPlausibleProductName(name) || !seen.Add(name))
+                    continue;
+
+                var card = FindProductCard(link);
+                var cardText = card == null ? string.Empty : CleanText(card.InnerText) ?? string.Empty;
+
+                var quantity = 1d;
+                var quantityMatch = QuantityRegex.Match(cardText);
+                if (quantityMatch.Success)
+                {
+                    var quantityText = quantityMatch.Groups[1].Value.Replace(',', '.');
+                    if (!double.TryParse(quantityText, NumberStyles.Float, CultureInfo.InvariantCulture, out quantity))
+                        quantity = 1;
+                }
+
+                items.Add(new HebShoppingListItem
+                {
+                    Name = name,
+                    Quantity = quantity,
+                    Unit = InferUnit(name),
+                    Category = FindCategory(card ?? link)
+                });
+            }
+        }
+
+        // Fallback for any future H-E-B markup where product links are not
+        // present, but only accept text that is clearly product-like. Never
+        // use category headings as product names.
+        if (items.Count == 0)
+        {
+            var quantityNodes = document.DocumentNode.SelectNodes(
+                "//*[contains(normalize-space(.), 'Qty:') and not(.//*[contains(normalize-space(.), 'Qty:')])]");
+
+            if (quantityNodes != null)
+            {
+                foreach (var node in quantityNodes)
+                {
+                    var card = FindProductCard(node);
+                    var name = card == null ? null : FindProductLinkName(card);
+
+                    if (string.IsNullOrWhiteSpace(name))
+                        continue;
+
+                    name = CleanProductName(name);
+                    if (!IsPlausibleProductName(name) || !seen.Add(name))
+                        continue;
+
+                    var text = CleanText(node.InnerText) ?? string.Empty;
+                    var quantityMatch = QuantityRegex.Match(text);
+                    var quantity = 1d;
+                    if (quantityMatch.Success)
+                    {
+                        var quantityText = quantityMatch.Groups[1].Value.Replace(',', '.');
+                        if (!double.TryParse(quantityText, NumberStyles.Float, CultureInfo.InvariantCulture, out quantity))
+                            quantity = 1;
+                    }
+
+                    items.Add(new HebShoppingListItem
+                    {
+                        Name = name,
+                        Quantity = quantity,
+                        Unit = InferUnit(name),
+                        Category = FindCategory(card ?? node)
+                    });
+                }
+            }
         }
 
         if (items.Count == 0)
-            throw new InvalidOperationException("The H-E-B page was reached, but no shopping-list items could be read.");
+            throw new InvalidOperationException(
+                "The H-E-B page was reached, but no shopping-list products could be read.");
 
         return new HebShoppingList { Name = title, Items = items };
     }
 
-    private static string? FindProductName(HtmlNode node)
+    private static HtmlNode? FindProductCard(HtmlNode node)
     {
-        // H-E-B renders the quantity near the bottom of each product card.
-        // The quantity node itself usually contains no product name, so walk
-        // upward through its ancestors and inspect each product-card level.
         for (var current = node; current != null; current = current.ParentNode)
         {
-            foreach (var selector in new[]
-            {
-                ".//h2",
-                ".//h3",
-                ".//h4",
-                ".//a[contains(@href, '/p/') ]"
-            })
-            {
-                var candidate = CleanText(current.SelectSingleNode(selector)?.InnerText);
-                if (IsPlausibleProductName(candidate)) return candidate;
-            }
+            var text = CleanText(current.InnerText) ?? string.Empty;
+            if (QuantityRegex.IsMatch(text) && ContainsProductLink(current))
+                return current;
 
-            // Avoid walking all the way up to the entire document.
-            if (current.ParentNode == null || current.ParentNode.Name.Equals("body", StringComparison.OrdinalIgnoreCase))
+            if (current.ParentNode == null ||
+                current.ParentNode.Name.Equals("body", StringComparison.OrdinalIgnoreCase))
                 break;
         }
 
         return null;
     }
 
+    private static bool ContainsProductLink(HtmlNode node) =>
+        node.SelectSingleNode(".//a[contains(@href, '/p/') and normalize-space(string(.)) != '']") != null;
+
+    private static string? FindProductLinkName(HtmlNode node)
+    {
+        var link = node.SelectSingleNode(
+            ".//a[contains(@href, '/p/') and normalize-space(string(.)) != '']");
+        return CleanText(link?.InnerText);
+    }
+
     private static string FindCategory(HtmlNode node)
     {
-        HtmlNode? current = node.ParentNode;
-        var depth = 0;
-
-        for (; current != null && depth < 8; current = current.ParentNode, depth++)
+        // The H-E-B category heading is a preceding section heading, not the
+        // product's own name. Look for the nearest preceding h2 as we climb.
+        for (var current = node; current != null; current = current.ParentNode)
         {
-            var headings = current.SelectNodes(".//h2");
-            if (headings == null) continue;
-
-            foreach (var heading in headings)
-            {
-                var category = CleanText(heading.InnerText);
-                if (!string.IsNullOrWhiteSpace(category) && category.Length < 80)
-                    return category;
-            }
+            var heading = current.SelectSingleNode("./preceding-sibling::h2[1]");
+            var category = CleanText(heading?.InnerText);
+            if (!string.IsNullOrWhiteSpace(category) && category.Length < 80)
+                return category;
         }
 
         return string.Empty;
@@ -153,7 +194,20 @@ public sealed class HebShoppingListImporter : IHebShoppingListImporter
 
     private static bool IsPlausibleProductName(string? text)
     {
-        if (string.IsNullOrWhiteSpace(text) || text.Length < 2 || text.Length > 250) return false;
+        if (string.IsNullOrWhiteSpace(text) || text.Length < 2 || text.Length > 250)
+            return false;
+
+        if (text.Equals("Bakery & bread", StringComparison.OrdinalIgnoreCase) ||
+            text.Equals("Beverages", StringComparison.OrdinalIgnoreCase) ||
+            text.Equals("Dairy & eggs", StringComparison.OrdinalIgnoreCase) ||
+            text.Equals("Deli & prepared food", StringComparison.OrdinalIgnoreCase) ||
+            text.Equals("Everyday essentials", StringComparison.OrdinalIgnoreCase) ||
+            text.Equals("Frozen food", StringComparison.OrdinalIgnoreCase) ||
+            text.Equals("Fruit & vegetables", StringComparison.OrdinalIgnoreCase) ||
+            text.Equals("Meat & seafood", StringComparison.OrdinalIgnoreCase) ||
+            text.Equals("Pantry", StringComparison.OrdinalIgnoreCase))
+            return false;
+
         if (text.Contains("Qty:", StringComparison.OrdinalIgnoreCase)) return false;
         if (text.StartsWith("Select ", StringComparison.OrdinalIgnoreCase)) text = text[7..];
         if (Regex.IsMatch(text, "^\\$?\\d+(?:\\.\\d+)?(?:\\s|$)")) return false;
