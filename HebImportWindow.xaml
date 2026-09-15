@@ -21,8 +21,14 @@
                 <DataGridTextColumn Header="H-E-B Item" Binding="{Binding Name}" IsReadOnly="True" Width="3*"/>
                 <DataGridTextColumn Header="Qty" Binding="{Binding Quantity}" IsReadOnly="True" Width="70"/>
                 <DataGridTextColumn Header="Category" Binding="{Binding Category}" IsReadOnly="True" Width="1.5*"/>
-                <DataGridComboBoxColumn Header="Storage" SelectedItemBinding="{Binding Location, UpdateSourceTrigger=PropertyChanged}" Width="110"
-                                        ItemsSource="{Binding Source={x:Static Application.Current}}"/>
+                <DataGridTemplateColumn Header="Storage" Width="110">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <ComboBox ItemsSource="{Binding DataContext.Locations, RelativeSource={RelativeSource AncestorType=Window}}"
+                                      SelectedItem="{Binding Location, UpdateSourceTrigger=PropertyChanged}"/>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
             </DataGrid.Columns>
         </DataGrid>
 
