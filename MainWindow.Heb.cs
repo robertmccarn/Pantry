@@ -21,24 +21,10 @@ public partial class MainWindow
         }
 
         BtnImportHeb.IsEnabled = false;
+        BtnImportHeb.Content = "Opening H-E-B...";
         try
         {
-            HebShoppingList list;
-            try
-            {
-                // Fast path: direct HTTP request.
-                list = await _hebImporter.ImportAsync(url);
-            }
-            catch (HttpRequestException)
-            {
-                list = await ImportHebWithBrowserAsync(url);
-            }
-            catch (InvalidOperationException)
-            {
-                // H-E-B may return a JavaScript page or human-verification page.
-                list = await ImportHebWithBrowserAsync(url);
-            }
-
+            var list = await ImportHebWithBrowserAsync(url);
             var preview = new HebImportWindow(list, this);
             if (preview.ShowDialog() != true) return;
 
@@ -76,6 +62,7 @@ public partial class MainWindow
         }
         finally
         {
+            BtnImportHeb.Content = "Import H-E-B List";
             BtnImportHeb.IsEnabled = true;
         }
     }
@@ -85,7 +72,7 @@ public partial class MainWindow
         var webView = new WebView2();
         var host = new Window
         {
-            Title = "H-E-B Verification / Shopping List",
+            Title = "H-E-B Shopping List",
             Width = 1100,
             Height = 750,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
@@ -110,13 +97,11 @@ public partial class MainWindow
             host.Show();
             webView.CoreWebView2.Navigate(url);
 
-            if (!await navigation.Task.WaitAsync(TimeSpan.FromSeconds(30)))
-                throw new InvalidOperationException("H-E-B did not finish loading within 30 seconds.");
+            if (!await navigation.Task.WaitAsync(TimeSpan.FromSeconds(45)))
+                throw new InvalidOperationException("H-E-B did not finish loading within 45 seconds.");
 
             webView.NavigationCompleted -= OnNavigationCompleted;
 
-            // H-E-B can display an "Are you a human?" verification page.
-            // Keep the browser visible so the user can complete the verification.
             var hasItems = false;
             for (var attempt = 0; attempt < 240; attempt++)
             {
@@ -132,12 +117,10 @@ public partial class MainWindow
             }
 
             if (!hasItems)
-                throw new InvalidOperationException("H-E-B did not expose the shopping-list items. If H-E-B showed an 'Are you a human?' check, complete it in the browser window and try the import again.");
+                throw new InvalidOperationException("H-E-B did not expose the shopping-list items. Please finish any page verification and try again.");
 
-            var htmlJson = await webView.CoreWebView2.ExecuteScriptAsync(
-                "document.documentElement.outerHTML");
+            var htmlJson = await webView.CoreWebView2.ExecuteScriptAsync("document.documentElement.outerHTML");
             var html = JsonSerializer.Deserialize<string>(htmlJson);
-
             if (string.IsNullOrWhiteSpace(html))
                 throw new InvalidOperationException("H-E-B loaded, but no page content was returned.");
 
@@ -154,7 +137,6 @@ public partial class MainWindow
     private sealed class StaticHtmlHandler : HttpMessageHandler
     {
         private readonly string _html;
-
         public StaticHtmlHandler(string html) => _html = html;
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
