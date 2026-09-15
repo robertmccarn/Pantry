@@ -85,26 +85,46 @@ public partial class MainWindow
 
         try
         {
+            // Show the browser window BEFORE initializing WebView2 so the user
+            // can immediately see any H-E-B verification or loading page.
+            host.Show();
+            host.Activate();
+
             await webView.EnsureCoreWebView2Async();
+            webView.CoreWebView2.Navigate(url);
 
             var navigation = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
             void OnNavigationCompleted(object? sender, Microsoft.Web.WebView2.Core.CoreWebView2NavigationCompletedEventArgs args)
             {
                 navigation.TrySetResult(args.IsSuccess);
             }
 
             webView.NavigationCompleted += OnNavigationCompleted;
-            host.Show();
-            webView.CoreWebView2.Navigate(url);
+            try
+            {
+                // Navigation may complete before the handler is attached in
+                // unusual cases, so allow the DOM polling below to determine
+                // whether the shopping list is actually available.
+                await navigation.Task.WaitAsync(TimeSpan.FromSeconds(45));
+            }
+            catch (TimeoutException)
+            {
+                // Continue to DOM polling. H-E-B can keep navigation open while
+                // client-side content or verification is still being processed.
+            }
+            finally
+            {
+                webView.NavigationCompleted -= OnNavigationCompleted;
+            }
 
-            if (!await navigation.Task.WaitAsync(TimeSpan.FromSeconds(45)))
-                throw new InvalidOperationException("H-E-B did not finish loading within 45 seconds.");
-
-            webView.NavigationCompleted -= OnNavigationCompleted;
-
+            // Give H-E-B plenty of time to complete a human-verification step
+            // and render the shopping list.
             var hasItems = false;
             for (var attempt = 0; attempt < 240; attempt++)
             {
+                host.Activate();
+
                 var readyJson = await webView.CoreWebView2.ExecuteScriptAsync(
                     "document.body && document.body.innerText.includes('Qty:')");
                 if (readyJson.Equals("true", StringComparison.OrdinalIgnoreCase))
@@ -117,7 +137,7 @@ public partial class MainWindow
             }
 
             if (!hasItems)
-                throw new InvalidOperationException("H-E-B did not expose the shopping-list items. Please finish any page verification and try again.");
+                throw new InvalidOperationException("H-E-B did not expose the shopping-list items. Complete any 'Are you a human?' verification in the H-E-B window and try again.");
 
             var htmlJson = await webView.CoreWebView2.ExecuteScriptAsync("document.documentElement.outerHTML");
             var html = JsonSerializer.Deserialize<string>(htmlJson);
