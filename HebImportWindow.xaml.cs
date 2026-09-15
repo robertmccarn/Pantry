@@ -88,9 +88,9 @@ public partial class HebImportWindow : Window
 
     private void BtnImport_Click(object sender, RoutedEventArgs e)
     {
-        // Commit any in-progress DataGrid edit before reading the selected rows.
-        GridImport.CommitEdit(DataGridEditingUnit.Cell);
-        GridImport.CommitEdit(DataGridEditingUnit.Row);
+        // Finish the current edit so checkbox changes are pushed to the row.
+        GridImport.CommitEdit(DataGridEditingUnit.Cell, true);
+        GridImport.CommitEdit(DataGridEditingUnit.Row, true);
 
         SelectedRows = Rows.Where(x => x.IsSelected).ToList();
         if (SelectedRows.Count == 0)
@@ -99,7 +99,6 @@ public partial class HebImportWindow : Window
             return;
         }
 
-        // ShowDialog() returns true to MainWindow, which then imports this snapshot.
         DialogResult = true;
     }
 
