@@ -58,11 +58,11 @@ public sealed class HebShoppingListImporter : IHebShoppingListImporter
     {
         var document = new HtmlDocument();
         document.LoadHtml(html);
-
         var title = CleanText(document.DocumentNode.SelectSingleNode("//h1")?.InnerText) ?? "H-E-B Shopping List";
         var items = new List<HebShoppingListItem>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var quantityNodes = document.DocumentNode.SelectNodes("//*[contains(normalize-space(.), 'Qty:')]");
+        var quantityNodes = document.DocumentNode.SelectNodes(
+            "//*[contains(normalize-space(.), 'Qty:') and not(.//*[contains(normalize-space(.), 'Qty:')])]" );
 
         if (quantityNodes == null)
             throw new InvalidOperationException("The H-E-B page was reached, but no shopping-list items could be read.");
@@ -71,7 +71,6 @@ public sealed class HebShoppingListImporter : IHebShoppingListImporter
         {
             var text = CleanText(node.InnerText);
             if (string.IsNullOrWhiteSpace(text)) continue;
-
             var quantityMatch = QuantityRegex.Match(text);
             if (!quantityMatch.Success) continue;
 
@@ -114,11 +113,15 @@ public sealed class HebShoppingListImporter : IHebShoppingListImporter
 
     private static string FindCategory(HtmlNode node)
     {
-        var current = node;
-        for (var depth = 0; depth < 8 && current != null; depth++, current = current.ParentNode)
+        for (var current = node.ParentNode, depth = 0; current != null && depth < 8; current = current.ParentNode, depth++)
         {
-            var category = CleanText(current.SelectSingleNode(".//h2")?.InnerText);
-            if (!string.IsNullOrWhiteSpace(category) && category.Length < 80) return category;
+            var headings = current.SelectNodes(".//h2");
+            if (headings == null) continue;
+            foreach (var heading in headings)
+            {
+                var category = CleanText(heading.InnerText);
+                if (!string.IsNullOrWhiteSpace(category) && category.Length < 80) return category;
+            }
         }
         return string.Empty;
     }
