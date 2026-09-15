@@ -1,15 +1,31 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
+using System.Runtime.CompilerServices;
 using System.Windows;
 
 namespace PersonalInventory;
 
-public sealed class HebImportRow
+public sealed class HebImportRow : INotifyPropertyChanged
 {
-    public bool IsSelected { get; set; } = true;
+    private bool _isSelected = true;
+
+    public bool IsSelected
+    {
+        get => _isSelected;
+        set
+        {
+            if (_isSelected == value) return;
+            _isSelected = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsSelected)));
+        }
+    }
+
     public string Name { get; init; } = string.Empty;
     public double Quantity { get; init; }
     public string Category { get; init; } = string.Empty;
     public StorageLocation Location { get; set; }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
 }
 
 public partial class HebImportWindow : Window
@@ -23,23 +39,42 @@ public partial class HebImportWindow : Window
         Owner = owner;
         DataContext = this;
         TxtListTitle.Text = list.Name;
-        TxtItemCount.Text = $"{list.Items.Count} items found. Select the items you want to add to your shopping list.";
 
         foreach (var item in list.Items)
         {
-            Rows.Add(new HebImportRow
+            var row = new HebImportRow
             {
                 Name = item.Name,
                 Quantity = item.Quantity,
                 Category = item.Category,
                 Location = SuggestLocation(item)
-            });
+            };
+            row.PropertyChanged += ImportRow_PropertyChanged;
+            Rows.Add(row);
         }
 
         GridImport.ItemsSource = Rows;
+        UpdateProgress();
     }
 
     public List<HebImportRow> SelectedRows => Rows.Where(x => x.IsSelected).ToList();
+
+    private void ImportRow_PropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(HebImportRow.IsSelected))
+            UpdateProgress();
+    }
+
+    private void UpdateProgress()
+    {
+        var total = Rows.Count;
+        var selected = Rows.Count(x => x.IsSelected);
+        ImportProgress.Value = total == 0 ? 0 : selected * 100.0 / total;
+        TxtProgressCount.Text = $"{selected}/{total}";
+        TxtItemCount.Text = total == 1
+            ? "1 item found. Select the items you want to add to your shopping list."
+            : $"{total} items found. Select the items you want to add to your shopping list.";
+    }
 
     private static StorageLocation SuggestLocation(HebShoppingListItem item)
     {
