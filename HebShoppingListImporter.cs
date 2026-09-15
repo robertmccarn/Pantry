@@ -132,9 +132,10 @@ public sealed class HebShoppingListImporter : IHebShoppingListImporter
 
     private static string FindCategory(HtmlNode node)
     {
-        for (var current = node.ParentNode, depth = 0;
-             current != null && depth < 8;
-             current = current.ParentNode, depth++)
+        HtmlNode? current = node.ParentNode;
+        var depth = 0;
+
+        for (; current != null && depth < 8; current = current.ParentNode, depth++)
         {
             var headings = current.SelectNodes(".//h2");
             if (headings == null) continue;
