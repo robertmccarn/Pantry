@@ -1,0 +1,12 @@
+[
+  {
+    "Id": "cb047c18",
+    "Name": "PopTarts",
+    "Location": 0,
+    "Quantity": 1,
+    "Unit": "box",
+    "MinimumThreshold": 0,
+    "IsMarkedForShopping": false,
+    "NeedsRestock": false
+  }
+]
