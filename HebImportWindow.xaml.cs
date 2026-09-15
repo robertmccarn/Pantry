@@ -1,7 +1,7 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
-using System.Runtime.CompilerServices;
 using System.Windows;
+using System.Windows.Controls;
 
 namespace PersonalInventory;
 
@@ -32,6 +32,7 @@ public partial class HebImportWindow : Window
 {
     public IReadOnlyList<StorageLocation> Locations { get; } = Enum.GetValues<StorageLocation>();
     public ObservableCollection<HebImportRow> Rows { get; } = new();
+    public List<HebImportRow> SelectedRows { get; private set; } = new();
 
     public HebImportWindow(HebShoppingList list, Window owner)
     {
@@ -56,8 +57,6 @@ public partial class HebImportWindow : Window
         GridImport.ItemsSource = Rows;
         UpdateProgress();
     }
-
-    public List<HebImportRow> SelectedRows => Rows.Where(x => x.IsSelected).ToList();
 
     private void ImportRow_PropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
@@ -89,19 +88,24 @@ public partial class HebImportWindow : Window
 
     private void BtnImport_Click(object sender, RoutedEventArgs e)
     {
-        if (!Rows.Any(x => x.IsSelected))
+        // Commit any in-progress DataGrid edit before reading the selected rows.
+        GridImport.CommitEdit(DataGridEditingUnit.Cell);
+        GridImport.CommitEdit(DataGridEditingUnit.Row);
+
+        SelectedRows = Rows.Where(x => x.IsSelected).ToList();
+        if (SelectedRows.Count == 0)
         {
             MessageBox.Show("Select at least one item to import.", "Nothing Selected", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
 
+        // ShowDialog() returns true to MainWindow, which then imports this snapshot.
         DialogResult = true;
-        Close();
     }
 
     private void BtnCancel_Click(object sender, RoutedEventArgs e)
     {
+        SelectedRows.Clear();
         DialogResult = false;
-        Close();
     }
 }
