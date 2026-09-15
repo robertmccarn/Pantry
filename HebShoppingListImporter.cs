@@ -66,10 +66,10 @@ public sealed class HebShoppingListImporter : IHebShoppingListImporter
         var items = new List<HebShoppingListItem>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        // H-E-B product names are links to /p/ product pages. This is much
+        // H-E-B product names are links to /product-detail/ product pages. This is much
         // safer than treating arbitrary DOM text or category headings as items.
         var productLinks = document.DocumentNode.SelectNodes(
-            "//a[contains(@href, '/p/') and normalize-space(string(.)) != '']");
+            "//a[contains(@href, '/product-detail/') and normalize-space(string(.)) != '']");
 
         if (productLinks != null)
         {
@@ -168,12 +168,12 @@ public sealed class HebShoppingListImporter : IHebShoppingListImporter
     }
 
     private static bool ContainsProductLink(HtmlNode node) =>
-        node.SelectSingleNode(".//a[contains(@href, '/p/') and normalize-space(string(.)) != '']") != null;
+        node.SelectSingleNode(".//a[contains(@href, '/product-detail/') and normalize-space(string(.)) != '']") != null;
 
     private static string? FindProductLinkName(HtmlNode node)
     {
         var link = node.SelectSingleNode(
-            ".//a[contains(@href, '/p/') and normalize-space(string(.)) != '']");
+            ".//a[contains(@href, '/product-detail/') and normalize-space(string(.)) != '']");
         return CleanText(link?.InnerText);
     }
 
