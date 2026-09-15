@@ -31,12 +31,11 @@ public partial class MainWindow
             }
             catch (HttpRequestException)
             {
-                // H-E-B may require a real browser session to render the list.
                 list = await ImportHebWithBrowserAsync(url);
             }
             catch (InvalidOperationException)
             {
-                // The HTTP response loaded, but the product list was rendered by JavaScript.
+                // H-E-B may return a JavaScript page or human-verification page.
                 list = await ImportHebWithBrowserAsync(url);
             }
 
@@ -86,12 +85,13 @@ public partial class MainWindow
         var webView = new WebView2();
         var host = new Window
         {
-            Width = 2,
-            Height = 2,
-            WindowStyle = WindowStyle.None,
-            ShowInTaskbar = false,
-            ShowActivated = false,
-            Opacity = 0,
+            Title = "H-E-B Verification / Shopping List",
+            Width = 1100,
+            Height = 750,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            WindowStyle = WindowStyle.SingleBorderWindow,
+            ShowInTaskbar = true,
+            ShowActivated = true,
             Owner = this,
             Content = webView
         };
@@ -115,14 +115,24 @@ public partial class MainWindow
 
             webView.NavigationCompleted -= OnNavigationCompleted;
 
-            // Wait for the client-side React content to render.
-            for (var attempt = 0; attempt < 20; attempt++)
+            // H-E-B can display an "Are you a human?" verification page.
+            // Keep the browser visible so the user can complete the verification.
+            var hasItems = false;
+            for (var attempt = 0; attempt < 240; attempt++)
             {
                 var readyJson = await webView.CoreWebView2.ExecuteScriptAsync(
-                    "document.body && (document.body.innerText.includes('Qty:') || document.querySelector('h1'))");
-                if (readyJson.Equals("true", StringComparison.OrdinalIgnoreCase)) break;
+                    "document.body && document.body.innerText.includes('Qty:')");
+                if (readyJson.Equals("true", StringComparison.OrdinalIgnoreCase))
+                {
+                    hasItems = true;
+                    break;
+                }
+
                 await Task.Delay(500);
             }
+
+            if (!hasItems)
+                throw new InvalidOperationException("H-E-B did not expose the shopping-list items. If H-E-B showed an 'Are you a human?' check, complete it in the browser window and try the import again.");
 
             var htmlJson = await webView.CoreWebView2.ExecuteScriptAsync(
                 "document.documentElement.outerHTML");
@@ -131,7 +141,6 @@ public partial class MainWindow
             if (string.IsNullOrWhiteSpace(html))
                 throw new InvalidOperationException("H-E-B loaded, but no page content was returned.");
 
-            // Feed the browser-rendered HTML through the same parser used by the HTTP path.
             using var client = new HttpClient(new StaticHtmlHandler(html));
             var browserImporter = new HebShoppingListImporter(client);
             return await browserImporter.ImportAsync(url);
